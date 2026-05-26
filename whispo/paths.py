@@ -2,7 +2,7 @@ from pathlib import Path
 
 HOME = Path.home()
 
-DATA_ROOT = HOME / "Documents" / "whispo" / ".obsidian" / "Whispo"
+DATA_ROOT = HOME / "Documents" / "whispo"
 RECORDINGS_DIR = DATA_ROOT / "recordings"
 TRANSCRIPTS_DIR = DATA_ROOT / "transcripts"
 NOTES_DIR = DATA_ROOT / "notes"
