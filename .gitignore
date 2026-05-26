@@ -1,0 +1,18 @@
+# audio sources — keep them out of git; long-term this bloats history
+*.m4a
+*.mp3
+*.wav
+*.opus
+*.flac
+*.aac
+*.ogg
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.python-version
+
+# os
+.DS_Store
+*~

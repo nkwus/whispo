@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Engine — called by interview-transcribe TUI or directly.
+# Usage:  transcribe-interview <audio-file> <stakeholder> [model]
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    echo "usage: transcribe-interview <audio-file> <stakeholder> [model]" >&2
+    exit 1
+fi
+
+AUDIO="$1"
+STAKEHOLDER="$2"
+MODEL="${3:-large-v3}"
+DATE=$(date +%Y-%m-%d)
+SLUG=$(echo "${STAKEHOLDER}" | tr '[:upper:] ' '[:lower:]-')
+OUT_DIR="${HOME}/Documents/whisperx/Transcripts"
+NOTE_DIR="${HOME}/Documents/whisperx/Interviews"
+NOTE="${NOTE_DIR}/${DATE}-${SLUG}.md"
+WORK_DIR=$(mktemp -d)
+TEMPLATE="${HOME}/Documents/whisperx/Templates/Interview.md"
+
+mkdir -p "${OUT_DIR}" "${NOTE_DIR}"
+
+# shellcheck disable=SC1091
+source "${HOME}/.venvs/whisperx/bin/activate"
+
+whisperx "${AUDIO}" \
+    --model "${MODEL}" \
+    --diarize \
+    --hf_token "${HF_TOKEN:?HF_TOKEN not set}" \
+    --output_dir "${WORK_DIR}" \
+    --output_format txt \
+    --language en \
+    --compute_type float16
+
+BASE=$(basename "${AUDIO%.*}")
+TXT="${WORK_DIR}/${BASE}.txt"
+
+cp "${TXT}" "${OUT_DIR}/${DATE}-${SLUG}.txt"
+
+sed -e "s/{{stakeholder}}/${STAKEHOLDER}/g" \
+    -e "s/{{date}}/${DATE}/g" "${TEMPLATE}" > "${NOTE}"
+echo "" >> "${NOTE}"
+cat "${TXT}" >> "${NOTE}"
+
+echo "${NOTE}"
