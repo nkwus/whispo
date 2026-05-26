@@ -50,27 +50,59 @@ cat "${TXT}" >> "${NOTE}"
 # or the model isn't pulled, so the engine still succeeds without it.
 OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:latest}"
 if command -v ollama &>/dev/null && ollama list 2>/dev/null | grep -q "^${OLLAMA_MODEL%%:*}"; then
-    PROMPT="You are summarizing a stakeholder interview transcript. "
-    PROMPT+="Produce: (1) a three-sentence summary, (2) up to 5 key claims with "
-    PROMPT+="the speaker label, (3) any explicit action items. Be concise. Transcript:"
+    # Call Ollama's HTTP API with format=json — far more reliable than
+    # parsing markdown headers from `ollama run`, and avoids the streaming
+    # pretty-printer's wrap-and-overstrike artifacts.
+    python3 - "${OLLAMA_MODEL}" "${TXT}" "${NOTE}" <<'PY' || true
+import json, sys, urllib.request, pathlib
 
-    SUMMARY_FILE=$(mktemp)
-    # TERM=dumb tells Ollama to skip its streaming pretty-printer; we still
-    # strip any residual ANSI escapes (ESC[…m, ESC[…D, ESC[K, etc.).
-    TERM=dumb ollama run "${OLLAMA_MODEL}" "${PROMPT}"$'\n\n'"$(cat "${TXT}")" 2>/dev/null \
-        | sed -E 's/\x1b\[[0-9;?]*[A-Za-z]//g' > "${SUMMARY_FILE}" || true
+model, txt_path, note_path = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+transcript = txt_path.read_text()
 
-    if [[ -s "${SUMMARY_FILE}" ]]; then
-        python3 - "${NOTE}" "${SUMMARY_FILE}" <<'PY'
-import sys, pathlib
-note = pathlib.Path(sys.argv[1])
-summary = pathlib.Path(sys.argv[2]).read_text().strip()
-text = note.read_text()
-text = text.replace("## Summary\n\n\n", f"## Summary\n\n{summary}\n\n", 1)
-note.write_text(text)
+prompt = (
+    "Summarize this stakeholder interview. Output ONLY valid JSON matching this schema:\n"
+    "{\n"
+    '  "summary": "three-sentence summary of the conversation",\n'
+    '  "key_claims": ["SPEAKER_NN: claim text", ...up to 5...],\n'
+    '  "action_items": ["explicit action item", ...]\n'
+    "}\n"
+    "Use empty lists if a section has nothing. Speaker labels look like SPEAKER_00, SPEAKER_01.\n\n"
+    "Transcript:\n" + transcript
+)
+
+req = urllib.request.Request(
+    "http://localhost:11434/api/generate",
+    data=json.dumps({
+        "model": model,
+        "prompt": prompt,
+        "format": "json",
+        "stream": False,
+        # Unload the model from VRAM as soon as we're done so the next
+        # whisperx run isn't starved on this 8 GB card.
+        "keep_alive": 0,
+    }).encode(),
+    headers={"Content-Type": "application/json"},
+)
+try:
+    resp = json.loads(urllib.request.urlopen(req, timeout=300).read())
+    data = json.loads(resp.get("response", "{}"))
+except Exception:
+    sys.exit(0)
+
+text = note_path.read_text()
+if data.get("summary"):
+    text = text.replace("## Summary\n\n\n",
+                        f"## Summary\n\n{data['summary']}\n\n", 1)
+if data.get("key_claims"):
+    bullets = "\n".join(f"- {c}" for c in data["key_claims"])
+    text = text.replace("## Key claims\n\n\n",
+                        f"## Key claims\n\n{bullets}\n\n", 1)
+if data.get("action_items"):
+    bullets = "\n".join(f"- {i}" for i in data["action_items"])
+    text = text.replace("## Action items\n\n\n",
+                        f"## Action items\n\n{bullets}\n\n", 1)
+note_path.write_text(text)
 PY
-    fi
-    rm -f "${SUMMARY_FILE}"
 fi
 
 echo "${NOTE}"
