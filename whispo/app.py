@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -138,6 +139,7 @@ class WhispoApp(App):
 
     BINDINGS = [
         Binding("p", "process", "Process"),
+        Binding("v", "view_note", "View note"),
         Binding("r", "refresh", "Refresh"),
         Binding("tab", "focus_next", "Next pane", show=False),
         Binding("shift+tab", "focus_previous", "Prev pane", show=False),
@@ -158,6 +160,32 @@ class WhispoApp(App):
     def action_refresh(self) -> None:
         self.query_one(RecordingsPane).refresh_list()
         self.query_one(GpuPane)._update()
+
+    def action_view_note(self) -> None:
+        rec_pane = self.query_one(RecordingsPane)
+        audio = rec_pane.current()
+        out = self.query_one(OutputPane)
+        if audio is None:
+            out.write("[red]No recording selected.[/red]")
+            return
+        record = state.get_record(audio)
+        if not record:
+            out.write(f"[yellow]No note yet for {audio.name} — press P to process.[/yellow]")
+            return
+        note_path = record.get("note")
+        if not note_path or not Path(note_path).exists():
+            out.write(f"[red]Recorded note path missing on disk: {note_path}[/red]")
+            return
+        try:
+            subprocess.Popen(
+                ["flatpak", "run", "md.obsidian.Obsidian", note_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            out.write(f"[dim]Opening in Obsidian: {note_path}[/dim]")
+        except FileNotFoundError:
+            out.write("[red]flatpak not found — install Obsidian as a Flatpak.[/red]")
 
     def action_process(self) -> None:
         rec_pane = self.query_one(RecordingsPane)
