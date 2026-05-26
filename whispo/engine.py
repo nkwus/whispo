@@ -19,6 +19,7 @@ _PHASES = [
     ("transcribe", re.compile(r"Performing transcription")),
     ("align", re.compile(r"Performing alignment")),
     ("diarize", re.compile(r"Performing diarization")),
+    ("summary", re.compile(r"Performing summary")),
 ]
 _SEGMENT = re.compile(r"Transcript:\s*\[(\d+(?:\.\d+)?)\s*-->\s*(\d+(?:\.\d+)?)\]\s*(.*)")
 _NOISE = re.compile(

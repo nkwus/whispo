@@ -189,6 +189,7 @@ class WhispoApp(App):
             "transcribe": "Transcribing",
             "align": "Aligning timestamps",
             "diarize": "Diarizing speakers",
+            "summary": "Summarizing with LLM",
         }
 
         runner = EngineRun(audio, stakeholder, model)
