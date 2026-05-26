@@ -51,6 +51,8 @@ cat "${TXT}" >> "${NOTE}"
 # or the model isn't pulled, so the engine still succeeds without it.
 OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:latest}"
 if command -v ollama &>/dev/null && ollama list 2>/dev/null | grep -q "^${OLLAMA_MODEL%%:*}"; then
+    # Phase marker for the TUI: visible during the otherwise-silent Ollama wait.
+    echo "Performing summary using ${OLLAMA_MODEL}..." >&2
     # Call Ollama's HTTP API with format=json — far more reliable than
     # parsing markdown headers from `ollama run`, and avoids the streaming
     # pretty-printer's wrap-and-overstrike artifacts.
