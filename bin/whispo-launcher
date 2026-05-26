@@ -1,0 +1,12 @@
+#!/usr/bin/env -S zsh -i
+# Wrapper for whispo.desktop so the Exec line stays simple.
+# `-i` sources ~/.zshrc so HF_TOKEN is in the environment for transcribe-interview.
+# Activates the project venv so the `whispo` CLI is on PATH.
+source ~/Documents/code/whispo/.venv/bin/activate
+whispo
+ec=$?
+echo
+if (( ec != 0 )); then
+    echo "[exit $ec]"
+fi
+read -k 1 "?Press any key to close."

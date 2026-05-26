@@ -13,11 +13,12 @@ STAKEHOLDER="$2"
 MODEL="${3:-large-v3}"
 DATE=$(date +%Y-%m-%d)
 SLUG=$(echo "${STAKEHOLDER}" | tr '[:upper:] ' '[:lower:]-')
-OUT_DIR="${HOME}/Documents/whisperx/Transcripts"
-NOTE_DIR="${HOME}/Documents/whisperx/Interviews"
+VAULT="${HOME}/Documents/whispo/.obsidian/Whispo"
+OUT_DIR="${VAULT}/transcripts"
+NOTE_DIR="${VAULT}/notes"
 NOTE="${NOTE_DIR}/${DATE}-${SLUG}.md"
 WORK_DIR=$(mktemp -d)
-TEMPLATE="${HOME}/Documents/whisperx/Templates/Interview.md"
+TEMPLATE="${VAULT}/templates/Interview.md"
 
 mkdir -p "${OUT_DIR}" "${NOTE_DIR}"
 
