@@ -24,6 +24,9 @@ mkdir -p "${OUT_DIR}" "${NOTE_DIR}"
 # shellcheck disable=SC1091
 source "${HOME}/.venvs/whisperx/bin/activate"
 
+# Force unbuffered output so the TUI progress bar sees segments as they're emitted.
+export PYTHONUNBUFFERED=1
+
 whisperx "${AUDIO}" \
     --model "${MODEL}" \
     --diarize \

@@ -50,10 +50,74 @@ gum style --foreground 244 \
 gum confirm "Transcribe now?" || { gum style --foreground 196 "Aborted."; exit 0; }
 echo
 
+DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO" 2>/dev/null \
+    | awk '{printf "%.2f", $1}')
+[[ -z "$DURATION" ]] && DURATION=0
+
 LOG=$(mktemp)
-if gum spin --spinner dot \
-    --title "Transcribing... (this can take a few minutes)" -- \
-    bash -c "transcribe-interview '$AUDIO' '$STAKEHOLDER' '$MODEL' > '$LOG' 2>&1"; then
+transcribe-interview "$AUDIO" "$STAKEHOLDER" "$MODEL" > "$LOG" 2>&1 &
+ENGINE_PID=$!
+
+# Phase weights: VAD 5%, transcribe 70%, align 10%, diarize 15%.
+# During transcribe, scale by latest segment end-time / total duration.
+STAGE="Loading models"
+PERCENT=2
+
+render_bar() {
+    local pct=$1
+    local width=40
+    local filled=$(( pct * width / 100 ))
+    local empty=$(( width - filled ))
+    printf "  %3d%% [" "$pct"
+    printf "%${filled}s" '' | tr ' ' '#'
+    printf "%${empty}s" '' | tr ' ' '-'
+    printf "]  %s" "$2"
+}
+
+print_status() {
+    printf "\r\033[K"
+    render_bar "$PERCENT" "$STAGE"
+}
+
+print_status
+while kill -0 "$ENGINE_PID" 2>/dev/null; do
+    if [[ -s "$LOG" ]]; then
+        if grep -q "Performing diarization" "$LOG"; then
+            STAGE="Diarizing speakers"
+            PERCENT=90
+        elif grep -q "Performing alignment" "$LOG"; then
+            STAGE="Aligning timestamps"
+            PERCENT=82
+        elif grep -q "Performing transcription" "$LOG"; then
+            STAGE="Transcribing"
+            LAST_END=$(grep -oE 'Transcript: \[[0-9.]+ --> [0-9.]+\]' "$LOG" \
+                | tail -1 | awk -F'-->' '{print $2}' | tr -d ' []')
+            if [[ -n "$LAST_END" && $(echo "$DURATION > 0" | bc -l) -eq 1 ]]; then
+                PERCENT=$(awk -v end="$LAST_END" -v dur="$DURATION" \
+                    'BEGIN { printf "%d", 10 + (end/dur)*70 }')
+                (( PERCENT > 80 )) && PERCENT=80
+            else
+                PERCENT=12
+            fi
+        elif grep -q "Performing voice activity" "$LOG"; then
+            STAGE="Detecting voice activity"
+            PERCENT=5
+        fi
+    fi
+    print_status
+    sleep 0.5
+done
+
+wait "$ENGINE_PID"
+ENGINE_EXIT=$?
+
+PERCENT=100
+STAGE="Done"
+print_status
+echo
+echo
+
+if [[ $ENGINE_EXIT -eq 0 ]]; then
     NOTE=$(tail -n 1 "$LOG")
     gum style \
         --border rounded --margin "1 2" --padding "1 2" \
