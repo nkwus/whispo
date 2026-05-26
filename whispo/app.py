@@ -10,7 +10,7 @@ from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 from whispo import gpu, recordings, state
 from whispo.engine import EngineRun
-from whispo.recordings import duration_for, format_duration, list_recordings
+from whispo.recordings import duration_for, format_duration, list_recordings, stakeholder_from_filename
 from whispo.screens.process_modal import ProcessModal
 
 
@@ -195,7 +195,7 @@ class WhispoApp(App):
             out.write("[red]No recording selected.[/red]")
             return
 
-        default_stakeholder = audio.stem.replace("-", " ").replace("_", " ").strip().title()
+        default_stakeholder = stakeholder_from_filename(audio)
 
         def on_close(result):
             if not result:
