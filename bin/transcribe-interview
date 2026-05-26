@@ -22,6 +22,16 @@ TEMPLATE="${VAULT}/templates/Interview.md"
 
 mkdir -p "${OUT_DIR}" "${NOTE_DIR}"
 
+# Free GPU memory held by the summary model before whisperx loads its own ~5.5 GB.
+# Without this, an 8 GB card OOMs when the previous run left mistral resident.
+OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:latest}"
+if command -v curl &>/dev/null; then
+    curl -sS --max-time 5 \
+        http://localhost:11434/api/generate \
+        -d "{\"model\":\"${OLLAMA_MODEL}\",\"keep_alive\":0}" \
+        > /dev/null 2>&1 || true
+fi
+
 # shellcheck disable=SC1091
 source "${HOME}/.venvs/whisperx/bin/activate"
 
