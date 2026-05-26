@@ -46,4 +46,31 @@ sed -e "s/{{stakeholder}}/${STAKEHOLDER}/g" \
 echo "" >> "${NOTE}"
 cat "${TXT}" >> "${NOTE}"
 
+# Optional local summary via Ollama. Skips silently if ollama isn't installed
+# or the model isn't pulled, so the engine still succeeds without it.
+OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:latest}"
+if command -v ollama &>/dev/null && ollama list 2>/dev/null | grep -q "^${OLLAMA_MODEL%%:*}"; then
+    PROMPT="You are summarizing a stakeholder interview transcript. "
+    PROMPT+="Produce: (1) a three-sentence summary, (2) up to 5 key claims with "
+    PROMPT+="the speaker label, (3) any explicit action items. Be concise. Transcript:"
+
+    SUMMARY_FILE=$(mktemp)
+    # TERM=dumb tells Ollama to skip its streaming pretty-printer; we still
+    # strip any residual ANSI escapes (ESC[…m, ESC[…D, ESC[K, etc.).
+    TERM=dumb ollama run "${OLLAMA_MODEL}" "${PROMPT}"$'\n\n'"$(cat "${TXT}")" 2>/dev/null \
+        | sed -E 's/\x1b\[[0-9;?]*[A-Za-z]//g' > "${SUMMARY_FILE}" || true
+
+    if [[ -s "${SUMMARY_FILE}" ]]; then
+        python3 - "${NOTE}" "${SUMMARY_FILE}" <<'PY'
+import sys, pathlib
+note = pathlib.Path(sys.argv[1])
+summary = pathlib.Path(sys.argv[2]).read_text().strip()
+text = note.read_text()
+text = text.replace("## Summary\n\n\n", f"## Summary\n\n{summary}\n\n", 1)
+note.write_text(text)
+PY
+    fi
+    rm -f "${SUMMARY_FILE}"
+fi
+
 echo "${NOTE}"
