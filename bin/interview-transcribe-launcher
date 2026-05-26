@@ -1,7 +1,0 @@
-#!/usr/bin/env -S zsh -i
-# Wrapper used by interview-transcribe.desktop so the .desktop Exec line
-# stays simple (freedesktop spec is strict about ; and ' in Exec).
-# `-i` makes zsh source ~/.zshrc so HF_TOKEN is in the environment.
-interview-transcribe
-echo
-read -k 1 "?Press any key to close."

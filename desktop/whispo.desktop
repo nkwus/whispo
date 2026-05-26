@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Whispo
+Comment=Local interview transcription (WhisperX + Ollama + Obsidian)
+Exec=cosmic-term -e whispo-launcher
+Icon=audio-input-microphone
+Terminal=false
+Categories=AudioVideo;Utility;
+Keywords=transcribe;whisper;interview;notes;whispo;
