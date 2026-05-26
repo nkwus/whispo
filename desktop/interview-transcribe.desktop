@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Interview Transcribe
+Comment=Transcribe stakeholder interviews with speaker labels
+Exec=cosmic-term -e interview-transcribe-launcher
+Icon=audio-input-microphone
+Terminal=false
+Categories=AudioVideo;Utility;
+Keywords=transcribe;whisper;interview;notes;
