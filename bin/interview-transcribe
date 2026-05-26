@@ -57,6 +57,8 @@ DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$AUDIO" 2
 LOG=$(mktemp)
 transcribe-interview "$AUDIO" "$STAKEHOLDER" "$MODEL" > "$LOG" 2>&1 &
 ENGINE_PID=$!
+# Make sure the engine doesn't outlive the TUI if we crash or get Ctrl-C'd.
+trap 'kill "$ENGINE_PID" 2>/dev/null || true; wait "$ENGINE_PID" 2>/dev/null || true; rm -f "$LOG"' EXIT
 
 # Phase weights: VAD 5%, transcribe 70%, align 10%, diarize 15%.
 # During transcribe, scale by latest segment end-time / total duration.
@@ -90,8 +92,9 @@ while kill -0 "$ENGINE_PID" 2>/dev/null; do
             PERCENT=82
         elif grep -q "Performing transcription" "$LOG"; then
             STAGE="Transcribing"
-            LAST_END=$(grep -oE 'Transcript: \[[0-9.]+ --> [0-9.]+\]' "$LOG" \
-                | tail -1 | awk -F'-->' '{print $2}' | tr -d ' []')
+            # Tolerate "no segments yet": empty match must not trip pipefail+set -e
+            LAST_END=$( { grep -oE 'Transcript: \[[0-9.]+ --> [0-9.]+\]' "$LOG" 2>/dev/null \
+                | tail -1 | awk -F'-->' '{print $2}' | tr -d ' []'; } || true )
             if [[ -n "$LAST_END" && $(echo "$DURATION > 0" | bc -l) -eq 1 ]]; then
                 PERCENT=$(awk -v end="$LAST_END" -v dur="$DURATION" \
                     'BEGIN { printf "%d", 10 + (end/dur)*70 }')
@@ -108,8 +111,8 @@ while kill -0 "$ENGINE_PID" 2>/dev/null; do
     sleep 0.5
 done
 
-wait "$ENGINE_PID"
-ENGINE_EXIT=$?
+ENGINE_EXIT=0
+wait "$ENGINE_PID" || ENGINE_EXIT=$?
 
 PERCENT=100
 STAGE="Done"
