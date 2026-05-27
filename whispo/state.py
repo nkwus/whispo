@@ -35,3 +35,14 @@ def is_processed(audio: Path) -> bool:
 def get_record(audio: Path) -> dict | None:
     state = _load()
     return state.get("processed", {}).get(str(audio.resolve()))
+
+
+def last_model() -> str | None:
+    """Most recently used whisper model size, or None if never set."""
+    return _load().get("last_model")
+
+
+def set_last_model(model: str) -> None:
+    state = _load()
+    state["last_model"] = model
+    _save(state)

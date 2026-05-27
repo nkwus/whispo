@@ -288,6 +288,7 @@ class WhispoApp(App):
             return
 
         default_stakeholder = stakeholder_from_filename(audio)
+        default_model = state.last_model() or "large-v3"
 
         def on_close(result):
             if not result:
@@ -295,7 +296,10 @@ class WhispoApp(App):
             stakeholder, model = result
             self.run_worker(self._run_engine(audio, stakeholder, model), exclusive=True)
 
-        self.push_screen(ProcessModal(default_stakeholder=default_stakeholder), on_close)
+        self.push_screen(
+            ProcessModal(default_stakeholder=default_stakeholder, default_model=default_model),
+            on_close,
+        )
 
     async def _run_engine(self, audio: Path, stakeholder: str, model: str) -> None:
         out = self.query_one(OutputPane)
@@ -385,6 +389,7 @@ class WhispoApp(App):
                     status.show("Done", style="green")
                     out.write("")
                     out.write(f"[b green]✓ Done.[/b green]  note: {data}")
+                    state.set_last_model(model)
                     self.query_one(RecordingsPane).refresh_list()
                 elif kind == "error":
                     status.show(f"Error: {data}", style="red")
