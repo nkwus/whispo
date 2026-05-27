@@ -1,14 +1,13 @@
 ---
 type: interview
-stakeholder:
 project:
-date:
+date: {{date}}
 duration:
 status: raw
 tags: [interview, raw]
 ---
 
-# Interview — {{stakeholder}} ({{date}})
+# {{title}} ({{date}})
 
 ## Summary
 
