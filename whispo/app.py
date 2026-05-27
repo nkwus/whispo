@@ -16,6 +16,7 @@ from whispo import gpu, paths, recordings, speakers, state
 from whispo.engine import EngineRun
 from whispo.notes import parse_sections
 from whispo.recordings import duration_for, format_duration, list_recordings
+from whispo.screens.add_speaker_modal import AddSpeakerModal
 from whispo.screens.process_modal import ProcessModal
 from whispo.screens.rename_speakers_modal import RenameSpeakersModal
 
@@ -124,6 +125,72 @@ class RecordingsPane(DataTable):
         return None
 
 
+class SpeakersPane(DataTable):
+    """Persistent roster of all named speakers across recordings.
+
+    Auto-populated when a rename modal Apply yields new names; the user
+    can also add/remove manually via A and D when this pane has focus.
+    """
+
+    BINDINGS = [
+        Binding("a", "add_speaker", "Add"),
+        Binding("d", "delete_speaker", "Delete"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.names: list[str] = []
+
+    def on_mount(self) -> None:
+        self.cursor_type = "row"
+        self.zebra_stripes = True
+        self.show_header = True
+        self.add_columns("Speakers")
+        # Hydrate from existing per-recording speaker maps in case the user
+        # has renamed in past sessions before this pane existed.
+        state.backfill_roster()
+        self.refresh_list()
+
+    def refresh_list(self) -> None:
+        prev_row = self.cursor_row if self.row_count else 0
+        self.clear()
+        self.names = state.speaker_roster()
+        for n in self.names:
+            self.add_row(n)
+        if self.names:
+            self.move_cursor(row=min(prev_row, len(self.names) - 1))
+
+    def current(self) -> str | None:
+        if not self.names:
+            return None
+        idx = self.cursor_row
+        if 0 <= idx < len(self.names):
+            return self.names[idx]
+        return None
+
+    def action_add_speaker(self) -> None:
+        def on_close(name: str | None) -> None:
+            if not name:
+                return
+            added = state.add_to_roster(name)
+            self.refresh_list()
+            act = self.app.query_one(ActivityPane)
+            if added:
+                act.write(f"[dim]Added to roster:[/dim] {name}")
+            else:
+                act.write(f"[dim]Already in roster:[/dim] {name}")
+
+        self.app.push_screen(AddSpeakerModal(), on_close)
+
+    def action_delete_speaker(self) -> None:
+        name = self.current()
+        if not name:
+            return
+        if state.remove_from_roster(name):
+            self.refresh_list()
+            self.app.query_one(ActivityPane).write(f"[dim]Removed from roster:[/dim] {name}")
+
+
 class TranscriptPane(RichLog):
     """Only content that will end up in the Obsidian note: streamed segment
     text during a run, then the rendered Summary + Key claims after Done."""
@@ -186,9 +253,13 @@ class WhispoApp(App):
         layout: vertical;
         width: 50;
     }
-    #right {
+    #middle {
         layout: vertical;
         width: 1fr;
+    }
+    SpeakersPane {
+        width: 25;
+        border: round $primary;
     }
     GpuPane {
         height: 10;
@@ -286,11 +357,12 @@ class WhispoApp(App):
             with Vertical(id="left"):
                 yield GpuPane()
                 yield RecordingsPane()
-            with Vertical(id="right"):
+            with Vertical(id="middle"):
                 yield StatusBar("[dim]idle[/dim]")
                 yield ProgressBar(total=100, show_eta=False, show_percentage=True)
                 yield TranscriptPane()
                 yield ActivityPane()
+            yield SpeakersPane()
         yield Footer()
 
     def action_refresh(self) -> None:
@@ -347,6 +419,11 @@ class WhispoApp(App):
             renamed = ", ".join(f"{k}→{v}" for k, v in rewrite_map.items())
             act.write(f"[b green]Renamed:[/b green] {renamed}")
             act.write(f"[dim]{n_note} occurrences in note, {n_txt} in raw transcript.[/dim]")
+            # Auto-populate the speakers roster with any new names; refresh pane.
+            added = state.add_to_roster(*rewrite_map.values())
+            if added:
+                act.write(f"[dim]Added to roster:[/dim] {', '.join(added)}")
+                self.query_one(SpeakersPane).refresh_list()
             # Re-render the transcript view so updated speaker names show.
             self._render_transcript_view(note_path)
 

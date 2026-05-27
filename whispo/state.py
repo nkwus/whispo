@@ -73,3 +73,60 @@ def set_speakers(audio: Path, speakers: dict[str, str]) -> None:
         return
     processed[key]["speakers"] = dict(speakers)
     _save(state)
+
+
+# --- Cross-recording speaker roster -----------------------------------------
+
+def speaker_roster() -> list[str]:
+    """All speaker names ever entered, alphabetical, deduped."""
+    return sorted(set(_load().get("speaker_roster", [])))
+
+
+def add_to_roster(*names: str) -> list[str]:
+    """Add one or more names to the roster. Returns the names that were new.
+
+    Empty strings, whitespace-only, and placeholder labels (SPEAKER_NN)
+    are ignored — those aren't real speakers.
+    """
+    from whispo.speakers import is_placeholder
+    state = _load()
+    roster = set(state.get("speaker_roster", []))
+    added: list[str] = []
+    for raw in names:
+        name = raw.strip()
+        if not name or is_placeholder(name):
+            continue
+        if name not in roster:
+            roster.add(name)
+            added.append(name)
+    if added:
+        state["speaker_roster"] = sorted(roster)
+        _save(state)
+    return added
+
+
+def remove_from_roster(name: str) -> bool:
+    """Remove a name from the roster. Returns True if it was there."""
+    state = _load()
+    roster = set(state.get("speaker_roster", []))
+    if name not in roster:
+        return False
+    roster.discard(name)
+    state["speaker_roster"] = sorted(roster)
+    _save(state)
+    return True
+
+
+def backfill_roster() -> int:
+    """Hydrate the roster from every per-recording speakers map.
+
+    Idempotent — already-present names are skipped. Returns the number
+    of names newly added. Lets users who renamed before the roster
+    feature existed see their speakers without re-renaming.
+    """
+    names: list[str] = []
+    for record in _load().get("processed", {}).values():
+        for name in (record.get("speakers", {}) or {}).values():
+            if name:
+                names.append(name)
+    return len(add_to_roster(*names))
