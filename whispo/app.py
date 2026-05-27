@@ -14,6 +14,7 @@ from watchdog.observers import Observer
 
 from whispo import gpu, paths, recordings, state
 from whispo.engine import EngineRun
+from whispo.notes import parse_sections
 from whispo.recordings import duration_for, format_duration, list_recordings, stakeholder_from_filename
 from whispo.screens.process_modal import ProcessModal
 
@@ -388,7 +389,22 @@ class WhispoApp(App):
                     bar.update(progress=100)
                     status.show("Done", style="green")
                     out.write("")
-                    out.write(f"[b green]✓ Done.[/b green]  note: {data}")
+                    out.write(f"[b green]✓ Done.[/b green]  note: {Path(data).name}")
+                    # Surface the LLM-generated summary inline so the user
+                    # doesn't have to open Obsidian to see what was produced.
+                    sections = parse_sections(Path(data))
+                    summary = sections.get("Summary", "")
+                    if summary:
+                        out.write("")
+                        out.write("[b]Summary[/b]")
+                        out.write(summary)
+                    claims = sections.get("Key claims", "")
+                    if claims:
+                        out.write("")
+                        out.write("[b]Key claims[/b]")
+                        out.write(claims)
+                    out.write("")
+                    out.write(f"[dim]Press [b]V[/b] to open the full note in Obsidian.[/dim]")
                     state.set_last_model(model)
                     self.query_one(RecordingsPane).refresh_list()
                 elif kind == "error":
