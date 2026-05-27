@@ -214,6 +214,11 @@ class WhispoApp(App):
         out.clear()
         out.write(f"[b cyan]Processing[/b cyan]  {audio.name}")
         out.write(f"[dim]Stakeholder:[/dim] {stakeholder}    [dim]Model:[/dim] {model}")
+
+        # Compute audio duration up front for per-segment % during transcription.
+        duration = duration_for(audio) or 0.0
+        if duration:
+            out.write(f"[dim]Audio length: {format_duration(duration)}[/dim]")
         out.write("")
 
         phase_label = {
@@ -231,7 +236,14 @@ class WhispoApp(App):
                 out.write(f"[dim]{ts}[/dim] [b yellow]→[/b yellow] {phase_label.get(data, data)}")
             elif kind == "segment":
                 start, end, text = data
-                out.write(f"[dim]{ts}[/dim] [dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}")
+                if duration:
+                    pct = min(100, int(end / duration * 100))
+                    out.write(
+                        f"[dim]{ts}[/dim] [b cyan]{pct:>3d}%[/b cyan] "
+                        f"[dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}"
+                    )
+                else:
+                    out.write(f"[dim]{ts}[/dim] [dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}")
             elif kind == "log":
                 # quiet on routine engine logs; surface only if it looks important
                 if any(s in str(data).lower() for s in ("error", "exception", "traceback")):
