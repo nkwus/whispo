@@ -9,11 +9,29 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, ProgressBar, RichLog, Static
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
-from whispo import gpu, recordings, state
+from whispo import gpu, paths, recordings, state
 from whispo.engine import EngineRun
 from whispo.recordings import duration_for, format_duration, list_recordings, stakeholder_from_filename
 from whispo.screens.process_modal import ProcessModal
+
+
+class _RecordingsWatcher(FileSystemEventHandler):
+    """Bridges watchdog (thread) events to the Textual UI (main thread)."""
+
+    def __init__(self, app, on_change) -> None:
+        super().__init__()
+        self._app = app
+        self._on_change = on_change
+
+    def on_any_event(self, event) -> None:
+        # Only care about create/delete/move of files (not directory churn).
+        if event.is_directory:
+            return
+        if event.event_type in ("created", "deleted", "moved"):
+            self._app.call_from_thread(self._on_change)
 
 
 class GpuPane(Static):
@@ -54,13 +72,34 @@ class RecordingsPane(DataTable):
     def __init__(self):
         super().__init__()
         self.paths: list[Path] = []
+        self._observer: Observer | None = None
 
     def on_mount(self) -> None:
         self.cursor_type = "row"
         self.zebra_stripes = True
         self.add_columns("", "Recording", "Length")
         self.refresh_list()
-        self.set_interval(5.0, self.refresh_list)
+        # Watch the recordings dir for instant updates when a file is dropped.
+        try:
+            paths.RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+            self._observer = Observer()
+            self._observer.schedule(
+                _RecordingsWatcher(self.app, self.refresh_list),
+                str(paths.RECORDINGS_DIR),
+                recursive=False,
+            )
+            self._observer.start()
+        except Exception:
+            self._observer = None
+        # Periodic safety-net refresh in case the watcher misses something
+        # (e.g., the dir got recreated, an inotify limit was hit).
+        self.set_interval(15.0, self.refresh_list)
+
+    def on_unmount(self) -> None:
+        if self._observer is not None:
+            self._observer.stop()
+            self._observer.join(timeout=1.0)
+            self._observer = None
 
     def refresh_list(self) -> None:
         prev_row = self.cursor_row if self.row_count else 0
