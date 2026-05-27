@@ -6,23 +6,32 @@ from textual.widgets import Button, Input, Label
 
 
 class RenameSpeakersModal(ModalScreen[dict[str, str] | None]):
-    """Show one input per detected SPEAKER_NN label; return the rename mapping."""
+    """Modal for renaming speakers. Repeatable: pre-fills with current names.
+
+    Constructor takes a list of (original_label, current_name) tuples so
+    the modal can show the immutable SPEAKER_NN as the row label and the
+    editable current name in the input. Returns a dict keyed by the
+    original label.
+    """
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
 
-    def __init__(self, speakers: list[str]):
+    def __init__(self, speakers: list[tuple[str, str]]):
         super().__init__()
-        self.speakers = speakers
+        self.speakers = list(speakers)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="rename-modal"):
             yield Label("[b]Rename speakers[/b]")
-            yield Label("[dim]Empty fields leave that speaker unchanged.[/dim]")
+            yield Label(
+                "[dim]Edit, leave alone, or type the original "
+                "SPEAKER_NN to undo.[/dim]"
+            )
             yield Label("")
-            for sp in self.speakers:
+            for orig, current in self.speakers:
                 with Horizontal(classes="rename-row"):
-                    yield Label(sp, classes="rename-label")
-                    yield Input(placeholder="real name", id=f"input-{sp}")
+                    yield Label(orig, classes="rename-label")
+                    yield Input(value=current, id=f"input-{orig}")
             yield Label("")
             with Horizontal(id="rename-buttons"):
                 yield Button("Apply", variant="primary", id="ok")
@@ -30,18 +39,18 @@ class RenameSpeakersModal(ModalScreen[dict[str, str] | None]):
 
     def on_mount(self) -> None:
         if self.speakers:
-            self.query_one(f"#input-{self.speakers[0]}", Input).focus()
+            self.query_one(f"#input-{self.speakers[0][0]}", Input).focus()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
     def _collect(self) -> dict[str, str]:
-        mapping: dict[str, str] = {}
-        for sp in self.speakers:
-            new = self.query_one(f"#input-{sp}", Input).value.strip()
-            if new:
-                mapping[sp] = new
-        return mapping
+        out: dict[str, str] = {}
+        for orig, _current in self.speakers:
+            value = self.query_one(f"#input-{orig}", Input).value.strip()
+            if value:
+                out[orig] = value
+        return out
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "ok":
@@ -50,5 +59,4 @@ class RenameSpeakersModal(ModalScreen[dict[str, str] | None]):
             self.dismiss(None)
 
     def on_input_submitted(self, _: Input.Submitted) -> None:
-        # Enter in any input also submits the whole form.
         self.dismiss(self._collect())

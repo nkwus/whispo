@@ -298,24 +298,46 @@ class WhispoApp(App):
             out.write(f"[red]Note missing on disk: {note_path}[/red]")
             return
 
-        labels = speakers.find_speakers(note_path)
-        if not labels:
-            out.write("[yellow]No SPEAKER_NN labels found in the note (already renamed?).[/yellow]")
-            return
-
-        def on_close(mapping: dict[str, str] | None) -> None:
-            if not mapping:
+        # Use persisted speaker map if we have one (re-rename); otherwise
+        # bootstrap from a file scan (first-time rename).
+        current_map = state.get_speakers(audio)
+        if not current_map:
+            labels = speakers.find_speakers(note_path)
+            if not labels:
+                out.write("[yellow]No SPEAKER_NN labels found in the note.[/yellow]")
                 return
-            n_note = speakers.rename_speakers(note_path, mapping)
-            # Also update the raw transcript .txt so the two files stay in sync.
+            current_map = {label: label for label in labels}
+            state.set_speakers(audio, current_map)
+
+        speakers_list = sorted(current_map.items())
+
+        def on_close(new_map: dict[str, str] | None) -> None:
+            if new_map is None:
+                return
+            # Translate orig->new from the modal into current->new file edits.
+            rewrite_map: dict[str, str] = {}
+            updated = dict(current_map)
+            for orig, new in new_map.items():
+                current = current_map.get(orig)
+                if current and new != current:
+                    rewrite_map[current] = new
+                    updated[orig] = new
+
+            if not rewrite_map:
+                out.write("[dim]No changes.[/dim]")
+                return
+
+            n_note = speakers.rewrite_speakers(note_path, rewrite_map)
             txt_path = paths.TRANSCRIPTS_DIR / f"{note_path.stem}.txt"
-            n_txt = speakers.rename_speakers(txt_path, mapping) if txt_path.exists() else 0
-            renamed = ", ".join(f"{k}→{v}" for k, v in mapping.items())
+            n_txt = speakers.rewrite_speakers(txt_path, rewrite_map) if txt_path.exists() else 0
+            state.set_speakers(audio, updated)
+
+            renamed = ", ".join(f"{k}→{v}" for k, v in rewrite_map.items())
             out.write("")
             out.write(f"[b green]Renamed:[/b green] {renamed}")
             out.write(f"[dim]{n_note} occurrences in note, {n_txt} in raw transcript.[/dim]")
 
-        self.push_screen(RenameSpeakersModal(labels), on_close)
+        self.push_screen(RenameSpeakersModal(speakers_list), on_close)
 
     def action_view_note(self) -> None:
         rec_pane = self.query_one(RecordingsPane)
