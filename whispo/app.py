@@ -410,22 +410,26 @@ class WhispoApp(App):
         self.query_one(StatusBar).idle()
 
     def _render_transcript_view(self, note_path: Path) -> None:
-        """Replace the transcript pane with the note's Summary + Key claims."""
+        """Replace the transcript pane with a full render of the note's
+        sections (everything that's in the Obsidian file)."""
         t = self.query_one(TranscriptPane)
         t.clear()
         sections = parse_sections(note_path)
-        summary = sections.get("Summary", "")
-        if summary:
-            t.write("[b]Summary[/b]")
-            t.write(summary)
+        # Render in the order they appear in the template, skipping empty ones.
+        # Open Questions is intentionally always empty post-engine (it's for
+        # human synthesis), but we surface it if you've added anything.
+        order = ("Summary", "Key claims", "Open questions", "Action items", "Transcript")
+        wrote_anything = False
+        for header in order:
+            body = sections.get(header, "")
+            if not body:
+                continue
+            t.write(f"[b]{header}[/b]")
+            t.write(body)
             t.write("")
-        claims = sections.get("Key claims", "")
-        if claims:
-            t.write("[b]Key claims[/b]")
-            t.write(claims)
-            t.write("")
-        if not summary and not claims:
-            t.write("[dim](no summary or key claims in note)[/dim]")
+            wrote_anything = True
+        if not wrote_anything:
+            t.write("[dim](note has no rendered sections yet)[/dim]")
 
     async def _run_engine(self, audio: Path, stakeholder: str, model: str) -> None:
         transcript = self.query_one(TranscriptPane)
