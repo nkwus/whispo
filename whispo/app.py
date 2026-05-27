@@ -124,14 +124,23 @@ class RecordingsPane(DataTable):
         return None
 
 
-class OutputPane(RichLog):
-    """Scrolling log of the current/latest engine run."""
+class TranscriptPane(RichLog):
+    """Only content that will end up in the Obsidian note: streamed segment
+    text during a run, then the rendered Summary + Key claims after Done."""
 
     def on_mount(self) -> None:
         self.markup = True
         self.wrap = True
-        self.write("[b cyan]whispo[/b cyan]")
-        self.write("")
+        self.write("[dim]Transcript output will appear here.[/dim]")
+
+
+class ActivityPane(RichLog):
+    """Status / activity log: phase transitions, rename confirmations,
+    "Opening in Obsidian", errors, anything that is NOT note content."""
+
+    def on_mount(self) -> None:
+        self.markup = True
+        self.wrap = True
         self.write("[dim]Select a recording and press [b]P[/b] to process.[/dim]")
 
 
@@ -202,7 +211,12 @@ class WhispoApp(App):
     ProgressBar > Bar {
         width: 1fr;
     }
-    OutputPane {
+    TranscriptPane {
+        height: 3fr;
+        border: round $primary;
+        padding: 0 1;
+    }
+    ActivityPane {
         height: 1fr;
         border: round $primary;
         padding: 0 1;
@@ -275,7 +289,8 @@ class WhispoApp(App):
             with Vertical(id="right"):
                 yield StatusBar("[dim]idle[/dim]")
                 yield ProgressBar(total=100, show_eta=False, show_percentage=True)
-                yield OutputPane()
+                yield TranscriptPane()
+                yield ActivityPane()
         yield Footer()
 
     def action_refresh(self) -> None:
@@ -285,26 +300,24 @@ class WhispoApp(App):
     def action_rename_speakers(self) -> None:
         rec_pane = self.query_one(RecordingsPane)
         audio = rec_pane.current()
-        out = self.query_one(OutputPane)
+        act = self.query_one(ActivityPane)
         if audio is None:
-            out.write("[red]No recording selected.[/red]")
+            act.write("[red]No recording selected.[/red]")
             return
         record = state.get_record(audio)
         if not record:
-            out.write(f"[yellow]No note for {audio.name} yet — press P to process first.[/yellow]")
+            act.write(f"[yellow]No note for {audio.name} yet — press P to process first.[/yellow]")
             return
         note_path = Path(record["note"])
         if not note_path.exists():
-            out.write(f"[red]Note missing on disk: {note_path}[/red]")
+            act.write(f"[red]Note missing on disk: {note_path}[/red]")
             return
 
-        # Use persisted speaker map if we have one (re-rename); otherwise
-        # bootstrap from a file scan (first-time rename).
         current_map = state.get_speakers(audio)
         if not current_map:
             labels = speakers.find_speakers(note_path)
             if not labels:
-                out.write("[yellow]No SPEAKER_NN labels found in the note.[/yellow]")
+                act.write("[yellow]No SPEAKER_NN labels found in the note.[/yellow]")
                 return
             current_map = {label: label for label in labels}
             state.set_speakers(audio, current_map)
@@ -314,7 +327,6 @@ class WhispoApp(App):
         def on_close(new_map: dict[str, str] | None) -> None:
             if new_map is None:
                 return
-            # Translate orig->new from the modal into current->new file edits.
             rewrite_map: dict[str, str] = {}
             updated = dict(current_map)
             for orig, new in new_map.items():
@@ -324,7 +336,7 @@ class WhispoApp(App):
                     updated[orig] = new
 
             if not rewrite_map:
-                out.write("[dim]No changes.[/dim]")
+                act.write("[dim]No changes.[/dim]")
                 return
 
             n_note = speakers.rewrite_speakers(note_path, rewrite_map)
@@ -333,29 +345,28 @@ class WhispoApp(App):
             state.set_speakers(audio, updated)
 
             renamed = ", ".join(f"{k}→{v}" for k, v in rewrite_map.items())
-            out.write("")
-            out.write(f"[b green]Renamed:[/b green] {renamed}")
-            out.write(f"[dim]{n_note} occurrences in note, {n_txt} in raw transcript.[/dim]")
+            act.write(f"[b green]Renamed:[/b green] {renamed}")
+            act.write(f"[dim]{n_note} occurrences in note, {n_txt} in raw transcript.[/dim]")
+            # Re-render the transcript view so updated speaker names show.
+            self._render_transcript_view(note_path)
 
         self.push_screen(RenameSpeakersModal(speakers_list), on_close)
 
     def action_view_note(self) -> None:
         rec_pane = self.query_one(RecordingsPane)
         audio = rec_pane.current()
-        out = self.query_one(OutputPane)
+        act = self.query_one(ActivityPane)
         if audio is None:
-            out.write("[red]No recording selected.[/red]")
+            act.write("[red]No recording selected.[/red]")
             return
         record = state.get_record(audio)
         if not record:
-            out.write(f"[yellow]No note yet for {audio.name} — press P to process.[/yellow]")
+            act.write(f"[yellow]No note yet for {audio.name} — press P to process.[/yellow]")
             return
         note_path = record.get("note")
         if not note_path or not Path(note_path).exists():
-            out.write(f"[red]Recorded note path missing on disk: {note_path}[/red]")
+            act.write(f"[red]Recorded note path missing on disk: {note_path}[/red]")
             return
-        # Obsidian's URI scheme works whether or not the in-app CLI is enabled
-        # and routes through xdg-open → Obsidian's URL handler.
         uri = f"obsidian://open?path={urllib.parse.quote(str(note_path))}"
         try:
             subprocess.Popen(
@@ -364,16 +375,16 @@ class WhispoApp(App):
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            out.write(f"[dim]Opening in Obsidian: {Path(note_path).name}[/dim]")
+            act.write(f"[dim]Opening in Obsidian: {Path(note_path).name}[/dim]")
         except FileNotFoundError:
-            out.write("[red]xdg-open not found — can't launch Obsidian.[/red]")
+            act.write("[red]xdg-open not found — can't launch Obsidian.[/red]")
 
     def action_process(self) -> None:
         rec_pane = self.query_one(RecordingsPane)
         audio = rec_pane.current()
-        out = self.query_one(OutputPane)
+        act = self.query_one(ActivityPane)
         if audio is None:
-            out.write("[red]No recording selected.[/red]")
+            act.write("[red]No recording selected.[/red]")
             return
 
         default_stakeholder = stakeholder_from_filename(audio)
@@ -383,8 +394,6 @@ class WhispoApp(App):
             if not result:
                 return
             stakeholder, model = result
-            # Clear immediately so the user sees the reset the moment they
-            # confirm the modal, instead of waiting for the worker to start.
             self._reset_run_state()
             self.run_worker(self._run_engine(audio, stakeholder, model), exclusive=True)
 
@@ -394,26 +403,46 @@ class WhispoApp(App):
         )
 
     def _reset_run_state(self) -> None:
-        """Wipe output pane, progress bar, and status line in one place."""
-        self.query_one(OutputPane).clear()
+        """Wipe both panes, progress bar, and status line for a new run."""
+        self.query_one(TranscriptPane).clear()
+        self.query_one(ActivityPane).clear()
         self.query_one(ProgressBar).update(total=100, progress=0)
         self.query_one(StatusBar).idle()
 
+    def _render_transcript_view(self, note_path: Path) -> None:
+        """Replace the transcript pane with the note's Summary + Key claims."""
+        t = self.query_one(TranscriptPane)
+        t.clear()
+        sections = parse_sections(note_path)
+        summary = sections.get("Summary", "")
+        if summary:
+            t.write("[b]Summary[/b]")
+            t.write(summary)
+            t.write("")
+        claims = sections.get("Key claims", "")
+        if claims:
+            t.write("[b]Key claims[/b]")
+            t.write(claims)
+            t.write("")
+        if not summary and not claims:
+            t.write("[dim](no summary or key claims in note)[/dim]")
+
     async def _run_engine(self, audio: Path, stakeholder: str, model: str) -> None:
-        out = self.query_one(OutputPane)
+        transcript = self.query_one(TranscriptPane)
+        act = self.query_one(ActivityPane)
         status = self.query_one(StatusBar)
         bar = self.query_one(ProgressBar)
 
-        # _reset_run_state() already cleared, but keep a defensive clear in
-        # case this is invoked outside of the modal flow.
-        out.clear()
-        out.write(f"[b cyan]Processing[/b cyan]  {audio.name}")
-        out.write(f"[dim]Stakeholder:[/dim] {stakeholder}    [dim]Model:[/dim] {model}")
+        # Defensive clear in case this is invoked outside of the modal flow.
+        transcript.clear()
+        act.clear()
+        act.write(f"[b cyan]Processing[/b cyan]  {audio.name}")
+        act.write(f"[dim]Stakeholder:[/dim] {stakeholder}    [dim]Model:[/dim] {model}")
 
         duration = duration_for(audio) or 0.0
         if duration:
-            out.write(f"[dim]Audio length: {format_duration(duration)}[/dim]")
-        out.write("")
+            act.write(f"[dim]Audio length: {format_duration(duration)}[/dim]")
+        act.write("")
 
         bar.update(total=100, progress=0)
         status.show("Loading models")
@@ -465,8 +494,9 @@ class WhispoApp(App):
                     phase_estimate = estimate_for(data)
                     low, _high = PHASE_RANGES.get(data, (0, 0))
                     bar.update(progress=low)
-                    status.show(PHASE_LABELS.get(data, data))
-                    out.write(f"[dim]{ts}[/dim] [b yellow]→[/b yellow] {PHASE_LABELS.get(data, data)}")
+                    label = PHASE_LABELS.get(data, data)
+                    status.show(label)
+                    act.write(f"[dim]{ts}[/dim] [b yellow]→[/b yellow] {label}")
                 elif kind == "segment":
                     start, end, text = data
                     if current_phase == "transcribe" and duration:
@@ -474,42 +504,29 @@ class WhispoApp(App):
                         span = high - low
                         pct = min(100, int(low + (end / duration) * span))
                         bar.update(progress=pct)
-                        pct_text = f"[b cyan]{pct:>3d}%[/b cyan] "
-                    else:
-                        pct_text = ""
-                    out.write(
-                        f"[dim]{ts}[/dim] {pct_text}"
-                        f"[dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}"
-                    )
+                    # Transcript pane gets only the text — matches what's
+                    # destined for the Obsidian note.
+                    transcript.write(text)
                 elif kind == "log":
                     if any(s in str(data).lower() for s in ("error", "exception", "traceback")):
-                        out.write(f"[red]{data}[/red]")
+                        act.write(f"[red]{data}[/red]")
                 elif kind == "done":
                     bar.update(progress=100)
                     status.show("Done", style="green")
-                    out.write("")
-                    out.write(f"[b green]✓ Done.[/b green]  note: {Path(data).name}")
-                    # Surface the LLM-generated summary inline so the user
-                    # doesn't have to open Obsidian to see what was produced.
-                    sections = parse_sections(Path(data))
-                    summary = sections.get("Summary", "")
-                    if summary:
-                        out.write("")
-                        out.write("[b]Summary[/b]")
-                        out.write(summary)
-                    claims = sections.get("Key claims", "")
-                    if claims:
-                        out.write("")
-                        out.write("[b]Key claims[/b]")
-                        out.write(claims)
-                    out.write("")
-                    out.write(f"[dim]Press [b]V[/b] to open the full note in Obsidian.[/dim]")
+                    note_path = Path(data)
+                    act.write("")
+                    act.write(f"[b green]✓ Done.[/b green]  note: {note_path.name}")
+                    act.write(f"[dim]Press [b]V[/b] to open the full note in Obsidian.[/dim]")
+                    # Replace streaming segment text with the rendered note
+                    # content (Summary + Key claims) — those are the
+                    # digestible parts. Full diarized transcript is in Obsidian.
+                    self._render_transcript_view(note_path)
                     state.set_last_model(model)
                     self.query_one(RecordingsPane).refresh_list()
                 elif kind == "error":
                     status.show(f"Error: {data}", style="red")
-                    out.write("")
-                    out.write(f"[b red]✗ Error.[/b red]  {data}")
+                    act.write("")
+                    act.write(f"[b red]✗ Error.[/b red]  {data}")
         finally:
             if tick_handle is not None:
                 tick_handle.stop()
