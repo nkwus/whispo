@@ -8,6 +8,11 @@ dependencies = [
     "watchdog>=4.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
 [project.scripts]
 whispo = "whispo.__main__:main"
 
@@ -17,3 +22,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["whispo"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
