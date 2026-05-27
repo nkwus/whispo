@@ -1,5 +1,6 @@
 import asyncio
 import subprocess
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -176,16 +177,19 @@ class WhispoApp(App):
         if not note_path or not Path(note_path).exists():
             out.write(f"[red]Recorded note path missing on disk: {note_path}[/red]")
             return
+        # Obsidian's URI scheme works whether or not the in-app CLI is enabled
+        # and routes through xdg-open → Obsidian's URL handler.
+        uri = f"obsidian://open?path={urllib.parse.quote(str(note_path))}"
         try:
             subprocess.Popen(
-                ["flatpak", "run", "md.obsidian.Obsidian", note_path],
+                ["xdg-open", uri],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            out.write(f"[dim]Opening in Obsidian: {note_path}[/dim]")
+            out.write(f"[dim]Opening in Obsidian: {Path(note_path).name}[/dim]")
         except FileNotFoundError:
-            out.write("[red]flatpak not found — install Obsidian as a Flatpak.[/red]")
+            out.write("[red]xdg-open not found — can't launch Obsidian.[/red]")
 
     def action_process(self) -> None:
         rec_pane = self.query_one(RecordingsPane)
