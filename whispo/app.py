@@ -1,5 +1,6 @@
 import asyncio
 import subprocess
+import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -275,43 +276,84 @@ class WhispoApp(App):
         status.show("Loading models")
 
         current_phase: str | None = None
+        # Rough wall-time estimate per phase, so the bar advances even when
+        # the engine isn't emitting per-segment lines. Real events snap the
+        # bar to the truth; this is just to avoid the dead-air-then-jump UX
+        # that whisperx's batched output causes on short clips.
+        phase_start = 0.0
+        phase_estimate = 0.0
 
-        runner = EngineRun(audio, stakeholder, model)
-        async for kind, data in runner.run():
-            ts = datetime.now().strftime("%H:%M:%S")
-            if kind == "phase":
-                current_phase = data
-                low, _high = PHASE_RANGES.get(data, (0, 0))
-                bar.update(progress=low)
-                status.show(PHASE_LABELS.get(data, data))
-                out.write(f"[dim]{ts}[/dim] [b yellow]→[/b yellow] {PHASE_LABELS.get(data, data)}")
-            elif kind == "segment":
-                start, end, text = data
-                if current_phase == "transcribe" and duration:
-                    low, high = PHASE_RANGES["transcribe"]
-                    span = high - low
-                    pct = min(100, int(low + (end / duration) * span))
-                    bar.update(progress=pct)
-                    pct_text = f"[b cyan]{pct:>3d}%[/b cyan] "
-                else:
-                    pct_text = ""
-                out.write(
-                    f"[dim]{ts}[/dim] {pct_text}"
-                    f"[dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}"
-                )
-            elif kind == "log":
-                if any(s in str(data).lower() for s in ("error", "exception", "traceback")):
-                    out.write(f"[red]{data}[/red]")
-            elif kind == "done":
-                bar.update(progress=100)
-                status.show("Done", style="green")
-                out.write("")
-                out.write(f"[b green]✓ Done.[/b green]  note: {data}")
-                self.query_one(RecordingsPane).refresh_list()
-            elif kind == "error":
-                status.show(f"Error: {data}", style="red")
-                out.write("")
-                out.write(f"[b red]✗ Error.[/b red]  {data}")
+        def estimate_for(phase: str) -> float:
+            if phase == "transcribe":
+                # whisperx on a recent GPU runs roughly 10-15x realtime.
+                # Use 1/10 of audio duration with a 3s floor for tiny clips.
+                return max(3.0, (duration or 30.0) / 10.0)
+            if phase == "summary":
+                # Ollama summary scales with transcript length but ~30s is typical.
+                return 30.0
+            return 5.0  # vad / align / diarize are short
+
+        tick_handle = None
+
+        def tick():
+            # Smoothly fill from the current phase's low toward its high,
+            # capped so real events can still leap past us.
+            if current_phase not in PHASE_RANGES or phase_estimate <= 0:
+                return
+            low, high = PHASE_RANGES[current_phase]
+            elapsed = time.monotonic() - phase_start
+            frac = min(1.0, elapsed / phase_estimate)
+            # Leave a small headroom (95% of the slice) so we don't bump into
+            # the next phase before its real start event arrives.
+            target = low + (high - low) * frac * 0.95
+            current = bar.progress or 0
+            if target > current:
+                bar.update(progress=int(target))
+
+        tick_handle = self.set_interval(0.25, tick)
+
+        try:
+            runner = EngineRun(audio, stakeholder, model)
+            async for kind, data in runner.run():
+                ts = datetime.now().strftime("%H:%M:%S")
+                if kind == "phase":
+                    current_phase = data
+                    phase_start = time.monotonic()
+                    phase_estimate = estimate_for(data)
+                    low, _high = PHASE_RANGES.get(data, (0, 0))
+                    bar.update(progress=low)
+                    status.show(PHASE_LABELS.get(data, data))
+                    out.write(f"[dim]{ts}[/dim] [b yellow]→[/b yellow] {PHASE_LABELS.get(data, data)}")
+                elif kind == "segment":
+                    start, end, text = data
+                    if current_phase == "transcribe" and duration:
+                        low, high = PHASE_RANGES["transcribe"]
+                        span = high - low
+                        pct = min(100, int(low + (end / duration) * span))
+                        bar.update(progress=pct)
+                        pct_text = f"[b cyan]{pct:>3d}%[/b cyan] "
+                    else:
+                        pct_text = ""
+                    out.write(
+                        f"[dim]{ts}[/dim] {pct_text}"
+                        f"[dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}"
+                    )
+                elif kind == "log":
+                    if any(s in str(data).lower() for s in ("error", "exception", "traceback")):
+                        out.write(f"[red]{data}[/red]")
+                elif kind == "done":
+                    bar.update(progress=100)
+                    status.show("Done", style="green")
+                    out.write("")
+                    out.write(f"[b green]✓ Done.[/b green]  note: {data}")
+                    self.query_one(RecordingsPane).refresh_list()
+                elif kind == "error":
+                    status.show(f"Error: {data}", style="red")
+                    out.write("")
+                    out.write(f"[b red]✗ Error.[/b red]  {data}")
+        finally:
+            if tick_handle is not None:
+                tick_handle.stop()
 
 
 def main() -> None:
