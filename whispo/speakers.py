@@ -28,8 +28,13 @@ _INITIAL_LABEL = re.compile(r"\bSPEAKER_\d+\b")
 _PLACEHOLDER = re.compile(r"\ASPEAKER_\d+\Z")
 
 
-def _is_placeholder(name: str) -> bool:
+def is_placeholder(name: str) -> bool:
+    """True if name matches SPEAKER_NN (the diarizer's anonymous label)."""
     return bool(_PLACEHOLDER.match(name))
+
+
+# Backwards-compatible private alias used inside this module.
+_is_placeholder = is_placeholder
 
 
 def _transcript_form(name: str) -> str:
