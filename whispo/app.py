@@ -383,6 +383,9 @@ class WhispoApp(App):
             if not result:
                 return
             stakeholder, model = result
+            # Clear immediately so the user sees the reset the moment they
+            # confirm the modal, instead of waiting for the worker to start.
+            self._reset_run_state()
             self.run_worker(self._run_engine(audio, stakeholder, model), exclusive=True)
 
         self.push_screen(
@@ -390,11 +393,19 @@ class WhispoApp(App):
             on_close,
         )
 
+    def _reset_run_state(self) -> None:
+        """Wipe output pane, progress bar, and status line in one place."""
+        self.query_one(OutputPane).clear()
+        self.query_one(ProgressBar).update(total=100, progress=0)
+        self.query_one(StatusBar).idle()
+
     async def _run_engine(self, audio: Path, stakeholder: str, model: str) -> None:
         out = self.query_one(OutputPane)
         status = self.query_one(StatusBar)
         bar = self.query_one(ProgressBar)
 
+        # _reset_run_state() already cleared, but keep a defensive clear in
+        # case this is invoked outside of the modal flow.
         out.clear()
         out.write(f"[b cyan]Processing[/b cyan]  {audio.name}")
         out.write(f"[dim]Stakeholder:[/dim] {stakeholder}    [dim]Model:[/dim] {model}")
