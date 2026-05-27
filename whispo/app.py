@@ -7,7 +7,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, RichLog, Static
+from textual.widgets import DataTable, Footer, Header, ProgressBar, RichLog, Static
 
 from whispo import gpu, recordings, state
 from whispo.engine import EngineRun
@@ -93,6 +93,35 @@ class OutputPane(RichLog):
         self.write("[dim]Select a recording and press [b]P[/b] to process.[/dim]")
 
 
+# Each phase claims a slice of the overall progress bar.
+# Transcribe is the long one and scales by segment timestamps; the others
+# just jump to the bottom of their range when entered.
+PHASE_RANGES = {
+    "vad":        (0, 5),
+    "transcribe": (5, 80),
+    "align":      (80, 85),
+    "diarize":    (85, 92),
+    "summary":    (92, 99),
+}
+PHASE_LABELS = {
+    "vad":        "Detecting voice activity",
+    "transcribe": "Transcribing",
+    "align":      "Aligning timestamps",
+    "diarize":    "Diarizing speakers",
+    "summary":    "Summarizing with LLM",
+}
+
+
+class StatusBar(Static):
+    """Single-line phase + state indicator above the progress bar."""
+
+    def show(self, label: str, *, style: str = "yellow") -> None:
+        self.update(f"[b {style}]{label}[/b {style}]")
+
+    def idle(self) -> None:
+        self.update("[dim]idle[/dim]")
+
+
 class WhispoApp(App):
     CSS = """
     Screen {
@@ -106,6 +135,10 @@ class WhispoApp(App):
         layout: vertical;
         width: 50;
     }
+    #right {
+        layout: vertical;
+        width: 1fr;
+    }
     GpuPane {
         height: 10;
         padding: 1 2;
@@ -115,8 +148,20 @@ class WhispoApp(App):
         height: 1fr;
         border: round $primary;
     }
-    OutputPane {
+    StatusBar {
+        height: 1;
+        padding: 0 2;
+    }
+    ProgressBar {
+        height: 1;
+        padding: 0 2;
+        margin-bottom: 1;
+    }
+    ProgressBar > Bar {
         width: 1fr;
+    }
+    OutputPane {
+        height: 1fr;
         border: round $primary;
         padding: 0 1;
     }
@@ -155,7 +200,10 @@ class WhispoApp(App):
             with Vertical(id="left"):
                 yield GpuPane()
                 yield RecordingsPane()
-            yield OutputPane()
+            with Vertical(id="right"):
+                yield StatusBar("[dim]idle[/dim]")
+                yield ProgressBar(total=100, show_eta=False, show_percentage=True)
+                yield OutputPane()
         yield Footer()
 
     def action_refresh(self) -> None:
@@ -211,48 +259,57 @@ class WhispoApp(App):
 
     async def _run_engine(self, audio: Path, stakeholder: str, model: str) -> None:
         out = self.query_one(OutputPane)
+        status = self.query_one(StatusBar)
+        bar = self.query_one(ProgressBar)
+
         out.clear()
         out.write(f"[b cyan]Processing[/b cyan]  {audio.name}")
         out.write(f"[dim]Stakeholder:[/dim] {stakeholder}    [dim]Model:[/dim] {model}")
 
-        # Compute audio duration up front for per-segment % during transcription.
         duration = duration_for(audio) or 0.0
         if duration:
             out.write(f"[dim]Audio length: {format_duration(duration)}[/dim]")
         out.write("")
 
-        phase_label = {
-            "vad": "Detecting voice activity",
-            "transcribe": "Transcribing",
-            "align": "Aligning timestamps",
-            "diarize": "Diarizing speakers",
-            "summary": "Summarizing with LLM",
-        }
+        bar.update(total=100, progress=0)
+        status.show("Loading models")
+
+        current_phase: str | None = None
 
         runner = EngineRun(audio, stakeholder, model)
         async for kind, data in runner.run():
             ts = datetime.now().strftime("%H:%M:%S")
             if kind == "phase":
-                out.write(f"[dim]{ts}[/dim] [b yellow]→[/b yellow] {phase_label.get(data, data)}")
+                current_phase = data
+                low, _high = PHASE_RANGES.get(data, (0, 0))
+                bar.update(progress=low)
+                status.show(PHASE_LABELS.get(data, data))
+                out.write(f"[dim]{ts}[/dim] [b yellow]→[/b yellow] {PHASE_LABELS.get(data, data)}")
             elif kind == "segment":
                 start, end, text = data
-                if duration:
-                    pct = min(100, int(end / duration * 100))
-                    out.write(
-                        f"[dim]{ts}[/dim] [b cyan]{pct:>3d}%[/b cyan] "
-                        f"[dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}"
-                    )
+                if current_phase == "transcribe" and duration:
+                    low, high = PHASE_RANGES["transcribe"]
+                    span = high - low
+                    pct = min(100, int(low + (end / duration) * span))
+                    bar.update(progress=pct)
+                    pct_text = f"[b cyan]{pct:>3d}%[/b cyan] "
                 else:
-                    out.write(f"[dim]{ts}[/dim] [dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}")
+                    pct_text = ""
+                out.write(
+                    f"[dim]{ts}[/dim] {pct_text}"
+                    f"[dim][{start:>6.1f} → {end:>6.1f}][/dim] {text}"
+                )
             elif kind == "log":
-                # quiet on routine engine logs; surface only if it looks important
                 if any(s in str(data).lower() for s in ("error", "exception", "traceback")):
                     out.write(f"[red]{data}[/red]")
             elif kind == "done":
+                bar.update(progress=100)
+                status.show("Done", style="green")
                 out.write("")
                 out.write(f"[b green]✓ Done.[/b green]  note: {data}")
                 self.query_one(RecordingsPane).refresh_list()
             elif kind == "error":
+                status.show(f"Error: {data}", style="red")
                 out.write("")
                 out.write(f"[b red]✗ Error.[/b red]  {data}")
 
