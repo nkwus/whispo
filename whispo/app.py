@@ -15,7 +15,7 @@ from watchdog.observers import Observer
 from whispo import gpu, paths, recordings, speakers, state
 from whispo.engine import EngineRun
 from whispo.notes import parse_sections
-from whispo.recordings import duration_for, format_duration, list_recordings, stakeholder_from_filename
+from whispo.recordings import duration_for, format_duration, list_recordings
 from whispo.screens.process_modal import ProcessModal
 from whispo.screens.rename_speakers_modal import RenameSpeakersModal
 
@@ -387,20 +387,15 @@ class WhispoApp(App):
             act.write("[red]No recording selected.[/red]")
             return
 
-        default_stakeholder = stakeholder_from_filename(audio)
         default_model = state.last_model() or "large-v3"
 
-        def on_close(result):
-            if not result:
+        def on_close(model: str | None) -> None:
+            if not model:
                 return
-            stakeholder, model = result
             self._reset_run_state()
-            self.run_worker(self._run_engine(audio, stakeholder, model), exclusive=True)
+            self.run_worker(self._run_engine(audio, model), exclusive=True)
 
-        self.push_screen(
-            ProcessModal(default_stakeholder=default_stakeholder, default_model=default_model),
-            on_close,
-        )
+        self.push_screen(ProcessModal(default_model=default_model), on_close)
 
     def _reset_run_state(self) -> None:
         """Wipe both panes, progress bar, and status line for a new run."""
@@ -431,7 +426,7 @@ class WhispoApp(App):
         if not wrote_anything:
             t.write("[dim](note has no rendered sections yet)[/dim]")
 
-    async def _run_engine(self, audio: Path, stakeholder: str, model: str) -> None:
+    async def _run_engine(self, audio: Path, model: str) -> None:
         transcript = self.query_one(TranscriptPane)
         act = self.query_one(ActivityPane)
         status = self.query_one(StatusBar)
@@ -441,11 +436,11 @@ class WhispoApp(App):
         transcript.clear()
         act.clear()
         act.write(f"[b cyan]Processing[/b cyan]  {audio.name}")
-        act.write(f"[dim]Stakeholder:[/dim] {stakeholder}    [dim]Model:[/dim] {model}")
+        act.write(f"[dim]Model:[/dim] {model}")
 
         duration = duration_for(audio) or 0.0
         if duration:
-            act.write(f"[dim]Audio length: {format_duration(duration)}[/dim]")
+            act.write(f"[dim]Audio length:[/dim] {format_duration(duration)}")
         act.write("")
 
         bar.update(total=100, progress=0)
@@ -489,7 +484,7 @@ class WhispoApp(App):
         tick_handle = self.set_interval(0.25, tick)
 
         try:
-            runner = EngineRun(audio, stakeholder, model)
+            runner = EngineRun(audio, model)
             async for kind, data in runner.run():
                 ts = datetime.now().strftime("%H:%M:%S")
                 if kind == "phase":

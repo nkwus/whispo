@@ -29,14 +29,13 @@ _NOISE = re.compile(
 
 
 class EngineRun:
-    def __init__(self, audio: Path, stakeholder: str, model: str = "large-v3"):
+    def __init__(self, audio: Path, model: str = "large-v3"):
         self.audio = Path(audio)
-        self.stakeholder = stakeholder
         self.model = model
 
     async def run(self) -> AsyncIterator[tuple[str, object]]:
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-        cmd = [str(ENGINE), str(self.audio), self.stakeholder, self.model]
+        cmd = [str(ENGINE), str(self.audio), self.model]
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -83,7 +82,7 @@ class EngineRun:
 
         note_path = Path(last_line) if last_line else None
         if note_path and note_path.exists():
-            state.mark_processed(self.audio, note_path, self.stakeholder)
+            state.mark_processed(self.audio, note_path)
             yield ("done", note_path)
         else:
             yield ("error", "engine returned 0 but no note path was found in output")

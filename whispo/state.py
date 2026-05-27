@@ -18,12 +18,15 @@ def _save(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-def mark_processed(audio: Path, note: Path, stakeholder: str) -> None:
+def mark_processed(audio: Path, note: Path) -> None:
+    """Record that this audio has been processed and where the note landed."""
     state = _load()
-    state.setdefault("processed", {})[str(audio.resolve())] = {
-        "note": str(note),
-        "stakeholder": stakeholder,
-    }
+    processed = state.setdefault("processed", {})
+    key = str(audio.resolve())
+    # Preserve any existing fields (e.g. a `speakers` map) on re-process.
+    existing = processed.get(key, {})
+    existing["note"] = str(note)
+    processed[key] = existing
     _save(state)
 
 

@@ -1,31 +1,59 @@
 #!/usr/bin/env bash
-# Engine — called by interview-transcribe TUI or directly.
-# Usage:  transcribe-interview <audio-file> <stakeholder> [model]
+# Engine — called by the whispo TUI or directly.
+# Usage:  transcribe-interview <audio-file> [model]
+#
+# Stakeholder is no longer a concept — the note is keyed off the audio
+# filename, and people in the recording are tracked as speakers (see the
+# rename flow in the UI).
 set -euo pipefail
 
-if [[ $# -lt 2 ]]; then
-    echo "usage: transcribe-interview <audio-file> <stakeholder> [model]" >&2
+if [[ $# -lt 1 ]]; then
+    echo "usage: transcribe-interview <audio-file> [model]" >&2
     exit 1
 fi
 
 AUDIO="$1"
-STAKEHOLDER="$2"
-MODEL="${3:-large-v3}"
+MODEL="${2:-large-v3}"
 DATE=$(date +%Y-%m-%d)
-SLUG=$(echo "${STAKEHOLDER}" | tr '[:upper:] ' '[:lower:]-')
-# Raw outputs sit outside the vault; templated notes go inside it so Obsidian sees them.
+
+# Note + transcript filenames mirror the audio filename (minus extension)
+# so each recording maps to a single, easy-to-find output.
+BASE=$(basename "${AUDIO%.*}")
+
+# Raw outputs sit outside the vault; templated notes go inside it.
 RAW="${HOME}/Documents/whispo"
 VAULT="${RAW}/whispo_vault"
 OUT_DIR="${RAW}/transcripts"
 NOTE_DIR="${VAULT}/notes"
-NOTE="${NOTE_DIR}/${DATE}-${SLUG}.md"
+NOTE="${NOTE_DIR}/${BASE}.md"
 WORK_DIR=$(mktemp -d)
 TEMPLATE="${VAULT}/templates/Interview.md"
 
 mkdir -p "${OUT_DIR}" "${NOTE_DIR}"
 
+# Derive a human-friendly title from the audio filename: strip date prefixes
+# and recorder tags, replace separators with spaces, title-case.
+TITLE=$(python3 - "${AUDIO}" <<'PY'
+import re, sys
+from pathlib import Path
+stem = Path(sys.argv[1]).stem
+if not stem or stem.startswith("."):
+    print(stem)
+else:
+    stem = re.sub(
+        r"^(?:\d{4}[-_./]?\d{2}[-_./]?\d{2}|\d{2}[-_./]\d{2}[-_./]\d{2,4})[-_.\s]+",
+        "", stem,
+    )
+    stem = re.sub(
+        r"[-_.\s]+(?:recording|zoom|meet|teams|interview|raw|edited|copy|final)\b.*$",
+        "", stem, flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"[-_.]+", " ", stem).strip()
+    print(cleaned.title() if cleaned else Path(sys.argv[1]).stem.title())
+PY
+)
+
 # Free GPU memory held by the summary model before whisperx loads its own ~5.5 GB.
-# Without this, an 8 GB card OOMs when the previous run left mistral resident.
 OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:latest}"
 if command -v curl &>/dev/null; then
     curl -sS --max-time 5 \
@@ -49,25 +77,19 @@ whisperx "${AUDIO}" \
     --language en \
     --compute_type float16
 
-BASE=$(basename "${AUDIO%.*}")
 TXT="${WORK_DIR}/${BASE}.txt"
 
-cp "${TXT}" "${OUT_DIR}/${DATE}-${SLUG}.txt"
+cp "${TXT}" "${OUT_DIR}/${BASE}.txt"
 
-sed -e "s/{{stakeholder}}/${STAKEHOLDER}/g" \
-    -e "s/{{date}}/${DATE}/g" "${TEMPLATE}" > "${NOTE}"
+sed -e "s|{{title}}|${TITLE}|g" \
+    -e "s|{{date}}|${DATE}|g" "${TEMPLATE}" > "${NOTE}"
 echo "" >> "${NOTE}"
 cat "${TXT}" >> "${NOTE}"
 
 # Optional local summary via Ollama. Skips silently if ollama isn't installed
 # or the model isn't pulled, so the engine still succeeds without it.
-OLLAMA_MODEL="${OLLAMA_MODEL:-mistral:latest}"
 if command -v ollama &>/dev/null && ollama list 2>/dev/null | grep -q "^${OLLAMA_MODEL%%:*}"; then
-    # Phase marker for the TUI: visible during the otherwise-silent Ollama wait.
     echo "Performing summary using ${OLLAMA_MODEL}..." >&2
-    # Call Ollama's HTTP API with format=json — far more reliable than
-    # parsing markdown headers from `ollama run`, and avoids the streaming
-    # pretty-printer's wrap-and-overstrike artifacts.
     python3 - "${OLLAMA_MODEL}" "${TXT}" "${NOTE}" <<'PY' || true
 import json, sys, urllib.request, pathlib
 
@@ -75,7 +97,7 @@ model, txt_path, note_path = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Pat
 transcript = txt_path.read_text()
 
 prompt = (
-    "Summarize this stakeholder interview. Output ONLY valid JSON matching this schema:\n"
+    "Summarize this conversation transcript. Output ONLY valid JSON matching this schema:\n"
     "{\n"
     '  "summary": "three-sentence summary of the conversation",\n'
     '  "key_claims": ["SPEAKER_NN: claim text", ...up to 5...],\n'
@@ -92,8 +114,6 @@ req = urllib.request.Request(
         "prompt": prompt,
         "format": "json",
         "stream": False,
-        # Unload the model from VRAM as soon as we're done so the next
-        # whisperx run isn't starved on this 8 GB card.
         "keep_alive": 0,
     }).encode(),
     headers={"Content-Type": "application/json"},
