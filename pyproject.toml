@@ -5,6 +5,7 @@ description = "Local interview transcription with a Textual TUI on top of Whispe
 requires-python = ">=3.12"
 dependencies = [
     "textual>=0.80",
+    "watchdog>=4.0",
 ]
 
 [project.scripts]
