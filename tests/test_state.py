@@ -47,3 +47,28 @@ def test_mark_processed_and_get_record(tmp_path: Path) -> None:
 
 def test_unprocessed_returns_none_record(tmp_path: Path) -> None:
     assert state.get_record(tmp_path / "nothing.m4a") is None
+
+
+def test_speakers_round_trip(tmp_path: Path) -> None:
+    audio = tmp_path / "sample.m4a"
+    audio.touch()
+    note = tmp_path / "note.md"
+    note.touch()
+    state.mark_processed(audio, note, "Jane")
+
+    assert state.get_speakers(audio) == {}
+
+    state.set_speakers(audio, {"SPEAKER_00": "Jane", "SPEAKER_01": "Richard"})
+    assert state.get_speakers(audio) == {"SPEAKER_00": "Jane", "SPEAKER_01": "Richard"}
+
+    # Update one
+    state.set_speakers(audio, {"SPEAKER_00": "Jane Doe", "SPEAKER_01": "Richard"})
+    assert state.get_speakers(audio)["SPEAKER_00"] == "Jane Doe"
+
+
+def test_set_speakers_is_noop_for_unprocessed_recording(tmp_path: Path) -> None:
+    """Should not silently create a phantom record."""
+    audio = tmp_path / "unprocessed.m4a"
+    audio.touch()
+    state.set_speakers(audio, {"SPEAKER_00": "Jane"})
+    assert state.get_record(audio) is None
