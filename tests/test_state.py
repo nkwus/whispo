@@ -32,17 +32,30 @@ def test_set_last_model_overrides_previous() -> None:
 def test_mark_processed_and_get_record(tmp_path: Path) -> None:
     audio = tmp_path / "sample.m4a"
     audio.touch()
-    note = tmp_path / "2026-05-20-jane.md"
+    note = tmp_path / "sample.md"
     note.touch()
 
     assert state.is_processed(audio) is False
-    state.mark_processed(audio, note, "Jane")
+    state.mark_processed(audio, note)
     assert state.is_processed(audio) is True
 
     record = state.get_record(audio)
     assert record is not None
     assert record["note"] == str(note)
-    assert record["stakeholder"] == "Jane"
+
+
+def test_mark_processed_preserves_existing_speakers(tmp_path: Path) -> None:
+    """Re-processing a recording should keep its persisted speaker map."""
+    audio = tmp_path / "sample.m4a"
+    audio.touch()
+    note = tmp_path / "sample.md"
+    note.touch()
+    state.mark_processed(audio, note)
+    state.set_speakers(audio, {"SPEAKER_00": "Jane"})
+
+    # Re-process (e.g. fresh run)
+    state.mark_processed(audio, note)
+    assert state.get_speakers(audio) == {"SPEAKER_00": "Jane"}
 
 
 def test_unprocessed_returns_none_record(tmp_path: Path) -> None:
@@ -54,7 +67,7 @@ def test_speakers_round_trip(tmp_path: Path) -> None:
     audio.touch()
     note = tmp_path / "note.md"
     note.touch()
-    state.mark_processed(audio, note, "Jane")
+    state.mark_processed(audio, note)
 
     assert state.get_speakers(audio) == {}
 

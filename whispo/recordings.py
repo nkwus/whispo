@@ -1,4 +1,3 @@
-import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -6,35 +5,6 @@ from pathlib import Path
 from whispo.paths import RECORDINGS_DIR
 
 AUDIO_EXTS = {".m4a", ".mp3", ".wav", ".opus", ".flac", ".aac", ".ogg"}
-
-# Common filename patterns where the stakeholder/topic is preceded by metadata.
-# Strips leading date prefixes like 2026-05-20-, 20260520_, 26-05-20--, etc.
-_DATE_PREFIX = re.compile(
-    r"^(?:\d{4}[-_./]?\d{2}[-_./]?\d{2}|\d{2}[-_./]\d{2}[-_./]\d{2,4})[-_.\s]+",
-    re.IGNORECASE,
-)
-# Strips trailing recorder/source tags like " - Zoom", "_recording", " (mp3)".
-_TRAILING_TAGS = re.compile(
-    r"[-_.\s]+(?:recording|zoom|meet|teams|interview|raw|edited|copy|final)\b.*$",
-    re.IGNORECASE,
-)
-
-
-def stakeholder_from_filename(path: Path) -> str:
-    """Best-effort name extraction from an audio filename.
-
-    Strips date prefixes and recorder/source tags, replaces separators
-    with spaces, and title-cases the result. Returns empty string when
-    the filename has no usable name component (the modal then prompts).
-    """
-    stem = path.stem
-    # Hidden-file edge case: Path(".m4a").stem == ".m4a"
-    if not stem or stem.startswith("."):
-        return ""
-    stem = _DATE_PREFIX.sub("", stem)
-    stem = _TRAILING_TAGS.sub("", stem)
-    cleaned = re.sub(r"[-_.]+", " ", stem).strip()
-    return cleaned.title()
 
 
 def list_recordings() -> list[Path]:
