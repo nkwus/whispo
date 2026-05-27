@@ -12,11 +12,12 @@ from textual.widgets import DataTable, Footer, Header, ProgressBar, RichLog, Sta
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from whispo import gpu, paths, recordings, state
+from whispo import gpu, paths, recordings, speakers, state
 from whispo.engine import EngineRun
 from whispo.notes import parse_sections
 from whispo.recordings import duration_for, format_duration, list_recordings, stakeholder_from_filename
 from whispo.screens.process_modal import ProcessModal
+from whispo.screens.rename_speakers_modal import RenameSpeakersModal
 
 
 class _RecordingsWatcher(FileSystemEventHandler):
@@ -222,10 +223,40 @@ class WhispoApp(App):
     #process-modal-buttons Button {
         margin: 0 1;
     }
+    #rename-modal {
+        align: center middle;
+        background: $surface;
+        padding: 2 4;
+        width: 60;
+        height: auto;
+        max-height: 30;
+        border: thick $accent;
+    }
+    .rename-row {
+        height: 3;
+        layout: horizontal;
+    }
+    .rename-label {
+        width: 14;
+        content-align: left middle;
+        padding: 1 0;
+    }
+    .rename-row Input {
+        width: 1fr;
+    }
+    #rename-buttons {
+        align: center middle;
+        height: auto;
+        margin-top: 1;
+    }
+    #rename-buttons Button {
+        margin: 0 1;
+    }
     """
 
     BINDINGS = [
         Binding("p", "process", "Process"),
+        Binding("n", "rename_speakers", "Rename speakers"),
         Binding("v", "view_note", "View note"),
         Binding("r", "refresh", "Refresh"),
         Binding("tab", "focus_next", "Next pane", show=False),
@@ -250,6 +281,41 @@ class WhispoApp(App):
     def action_refresh(self) -> None:
         self.query_one(RecordingsPane).refresh_list()
         self.query_one(GpuPane)._update()
+
+    def action_rename_speakers(self) -> None:
+        rec_pane = self.query_one(RecordingsPane)
+        audio = rec_pane.current()
+        out = self.query_one(OutputPane)
+        if audio is None:
+            out.write("[red]No recording selected.[/red]")
+            return
+        record = state.get_record(audio)
+        if not record:
+            out.write(f"[yellow]No note for {audio.name} yet — press P to process first.[/yellow]")
+            return
+        note_path = Path(record["note"])
+        if not note_path.exists():
+            out.write(f"[red]Note missing on disk: {note_path}[/red]")
+            return
+
+        labels = speakers.find_speakers(note_path)
+        if not labels:
+            out.write("[yellow]No SPEAKER_NN labels found in the note (already renamed?).[/yellow]")
+            return
+
+        def on_close(mapping: dict[str, str] | None) -> None:
+            if not mapping:
+                return
+            n_note = speakers.rename_speakers(note_path, mapping)
+            # Also update the raw transcript .txt so the two files stay in sync.
+            txt_path = paths.TRANSCRIPTS_DIR / f"{note_path.stem}.txt"
+            n_txt = speakers.rename_speakers(txt_path, mapping) if txt_path.exists() else 0
+            renamed = ", ".join(f"{k}→{v}" for k, v in mapping.items())
+            out.write("")
+            out.write(f"[b green]Renamed:[/b green] {renamed}")
+            out.write(f"[dim]{n_note} occurrences in note, {n_txt} in raw transcript.[/dim]")
+
+        self.push_screen(RenameSpeakersModal(labels), on_close)
 
     def action_view_note(self) -> None:
         rec_pane = self.query_one(RecordingsPane)
