@@ -13,8 +13,10 @@ STAKEHOLDER="$2"
 MODEL="${3:-large-v3}"
 DATE=$(date +%Y-%m-%d)
 SLUG=$(echo "${STAKEHOLDER}" | tr '[:upper:] ' '[:lower:]-')
-VAULT="${HOME}/Documents/whispo"
-OUT_DIR="${VAULT}/transcripts"
+# Raw outputs sit outside the vault; templated notes go inside it so Obsidian sees them.
+RAW="${HOME}/Documents/whispo"
+VAULT="${RAW}/whispo_vault"
+OUT_DIR="${RAW}/transcripts"
 NOTE_DIR="${VAULT}/notes"
 NOTE="${NOTE_DIR}/${DATE}-${SLUG}.md"
 WORK_DIR=$(mktemp -d)
